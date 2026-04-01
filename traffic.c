@@ -1,91 +1,87 @@
 #include "traffic.h"
 #include "semaphore.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <rpi_gpio.h>
 
-// Define GPIO pins
-#define SENSOR_PIN 17
-#define RED_LED 22
-#define GREEN_LED 27
-#define YELLOW_LED 5
+#define RED_LED 5
+#define YELLOW_LED 16
+#define GREEN_LED 18
+#define BUZZER_PIN 24
 
-// Initialize traffic LEDs
-static int leds_init(void)
+extern semaphore_t sem;
+extern volatile unsigned sensor_state;
+
+static int outputs_init(void)
 {
-    if (rpi_gpio_setup(RED_LED, GPIO_OUT) != 0)
-        return -1;
-    if (rpi_gpio_setup(GREEN_LED, GPIO_OUT) != 0)
-        return -1;
-    if (rpi_gpio_setup(YELLOW_LED, GPIO_OUT) != 0)
-        return -1;
+    if (rpi_gpio_setup(RED_LED, GPIO_OUT) != 0) return -1;
+    if (rpi_gpio_setup(YELLOW_LED, GPIO_OUT) != 0) return -1;
+    if (rpi_gpio_setup(GREEN_LED, GPIO_OUT) != 0) return -1;
+    if (rpi_gpio_setup(BUZZER_PIN, GPIO_OUT) != 0) return -1;
     return 0;
-}
-
-// Helper functions to set lights
-static void set_red(void)
-{
-    rpi_gpio_output(RED_LED, GPIO_HIGH);
-    rpi_gpio_output(GREEN_LED, GPIO_LOW);
-    rpi_gpio_output(YELLOW_LED, GPIO_LOW);
-}
-
-static void set_green(void)
-{
-    rpi_gpio_output(RED_LED, GPIO_LOW);
-    rpi_gpio_output(GREEN_LED, GPIO_HIGH);
-    rpi_gpio_output(YELLOW_LED, GPIO_LOW);
 }
 
 static void set_yellow(void)
 {
     rpi_gpio_output(RED_LED, GPIO_LOW);
-    rpi_gpio_output(GREEN_LED, GPIO_LOW);
     rpi_gpio_output(YELLOW_LED, GPIO_HIGH);
+    rpi_gpio_output(GREEN_LED, GPIO_LOW);
 }
 
-// Traffic light thread
+static void set_green(void)
+{
+    rpi_gpio_output(RED_LED, GPIO_LOW);
+    rpi_gpio_output(YELLOW_LED, GPIO_LOW);
+    rpi_gpio_output(GREEN_LED, GPIO_HIGH);
+}
+
 void* traffic_light_thread(void* arg)
 {
-    (void)arg; // suppress unused warning
+    (void)arg;
 
-    if (leds_init() != 0)
+    if (outputs_init() != 0)
     {
-        perror("[Traffic] LED init failed");
+        perror("[Traffic] Output init failed");
         return NULL;
     }
 
-    printf("[Traffic] Task started\n");
+    printf("[Traffic] Thread started\n");
+
+    unsigned current_state = GPIO_LOW;
+    unsigned last_state = (unsigned)-1;
+
+    set_yellow();
+    rpi_gpio_output(BUZZER_PIN, GPIO_LOW);
+    printf("[Traffic] No motion -> YELLOW\n");
 
     while (1)
     {
-        unsigned sensor_level;
-        int ret;
+        sem_wait_custom(&sem);
+        current_state = sensor_state;
+        sem_post_custom(&sem);
 
-        // Read the sensor pin
-        ret = rpi_gpio_input(SENSOR_PIN, &sensor_level);
-        if (ret < 0)
+        if (current_state != last_state)
         {
-            printf("[Traffic] Error reading sensor pin %d\n", SENSOR_PIN);
-            sensor_level = 0; // safe default
+            if (current_state == GPIO_HIGH)
+            {
+                set_green();
+                printf("[Traffic] Motion -> GREEN\n");
+
+                rpi_gpio_output(BUZZER_PIN, GPIO_HIGH);
+                usleep(200000);   // short beep
+                rpi_gpio_output(BUZZER_PIN, GPIO_LOW);
+            }
+            else
+            {
+                set_yellow();
+                printf("[Traffic] No motion -> YELLOW\n");
+            }
+
+            last_state = current_state;
         }
 
-        // Decide which LED to turn on based on sensor
-        if (sensor_level)
-        {
-            set_green();
-            printf("[Traffic] Sensor HIGH: Green light\n");
-        }
-        else
-        {
-            set_yellow();
-            printf("[Traffic] Sensor LOW: Yellow light\n");
-        }
-
-        // Wait before next cycle
-        sleep(2);
+        usleep(100000);
     }
 
     return NULL;

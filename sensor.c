@@ -4,16 +4,22 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#define SENSOR_PIN 6
+#define SENSOR_PIN 22
 
 extern semaphore_t sem;
+extern volatile unsigned sensor_state;
 
 void* sensor_thread(void* arg)
 {
-    (void)arg; // avoid unused parameter warning
+    (void)arg;
 
-    unsigned level;
+    unsigned level = GPIO_LOW;
+    unsigned last_level = (unsigned)-1;
     int ret;
+
+    printf("[Sensor] Thread started on pin %d\n", SENSOR_PIN);
+    printf("[Sensor] Waiting for PIR to stabilize...\n");
+    sleep(5);
 
     while (1)
     {
@@ -21,20 +27,25 @@ void* sensor_thread(void* arg)
         if (ret < 0)
         {
             printf("[Sensor] Error reading pin %d\n", SENSOR_PIN);
-            level = 0; // safe default
+            level = GPIO_LOW;
         }
 
-        // Use level (0 = LOW, 1 = HIGH)
-        if (level)
+        sem_wait_custom(&sem);
+        sensor_state = level;
+        sem_post_custom(&sem);
+
+        if (level != last_level)
         {
-            printf("[Sensor] Pin HIGH\n");
-        }
-        else
-        {
-            printf("[Sensor] Pin LOW\n");
+            if (level == GPIO_HIGH)
+                printf("[Sensor] Motion detected\n");
+            else
+                printf("[Sensor] No motion\n");
+
+            printf("[Sensor] level=%u\n", level);
+            last_level = level;
         }
 
-        usleep(100000); // 100ms delay
+        usleep(100000);
     }
 
     return NULL;
