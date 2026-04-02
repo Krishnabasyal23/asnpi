@@ -13,7 +13,7 @@ void sem_wait_custom(semaphore_t* s) {
     pthread_mutex_unlock(&s->mutex);
 }
 
-void sem_post_custom(semaphore_t* s) {
+void sem_post_custom(semaphore_t* s) { 
     pthread_mutex_lock(&s->mutex);
     s->count++;
     pthread_cond_signal(&s->cond);
